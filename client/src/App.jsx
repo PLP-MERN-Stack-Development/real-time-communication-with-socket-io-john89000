@@ -21,13 +21,24 @@ export default function App() {
     typingUsers,
     rooms,
     currentRoom,
+    unreadCount,
+    unreadByRoom,
+    loadOlderMessages,
+    searchMessages,
+    reconnectAttempts,
   } = useSocket()
 
   const typingRef = useRef(null)
   const messagesRef = useRef(null)
 
   useEffect(() => {
-    // scroll to bottom when messages change
+    // update document title with unread count
+    if (typeof document !== 'undefined') {
+      document.title = unreadCount > 0 ? `(${unreadCount}) Socket.io Chat` : 'Socket.io Chat'
+    }
+  }, [unreadCount])
+
+  useEffect(() => {
     if (messagesRef.current) {
       messagesRef.current.scrollTop = messagesRef.current.scrollHeight
     }
@@ -116,12 +127,16 @@ export default function App() {
         <input placeholder="Your name" value={name} onChange={(e) => setName(e.target.value)} />
         <button onClick={join} style={{ marginLeft: 8 }}>Join</button>
         <button onClick={leave} style={{ marginLeft: 8 }}>Leave</button>
-        <div style={{ marginTop: 8 }}>Status: {isConnected ? 'Connected' : 'Disconnected'}</div>
+        <div style={{ marginTop: 8 }}>Status: {isConnected ? 'Connected' : 'Disconnected'} {reconnectAttempts ? `(reconnect attempt ${reconnectAttempts})` : ''}</div>
+        <div style={{ marginTop: 4, color: '#666' }}>Unread: {unreadCount}</div>
       </div>
 
       <div style={{ display: 'flex', gap: 20 }}>
         <div style={{ flex: 1 }}>
           <h3>Chat {currentRoom ? `(Room: ${currentRoom})` : '(Global)'}</h3>
+          <div style={{ marginBottom: 8 }}>
+            <button onClick={() => loadOlderMessages(50)}>Load older messages</button>
+          </div>
           <div ref={messagesRef} style={{ border: '1px solid #ddd', height: 300, overflow: 'auto', padding: 8 }}>
             {messages.map((m) => (
               <div key={m.id || Math.random()} style={{ marginBottom: 6 }}>
@@ -146,6 +161,8 @@ export default function App() {
                       <button onClick={() => reactMessage(m.id, 'like')}>👍 {m.reactions?.like || 0}</button>
                       <button onClick={() => reactMessage(m.id, 'love')} style={{ marginLeft: 6 }}>❤️ {m.reactions?.love || 0}</button>
                       <small style={{ marginLeft: 10, color: '#999' }}>{m.readBy?.length ? `Read by ${m.readBy.length}` : ''}</small>
+                      {m.pending && <small style={{ marginLeft: 10, color: '#f39c12' }}>Pending...</small>}
+                      {m.deliveredBy?.length ? <small style={{ marginLeft: 10, color: '#2ecc71' }}>Delivered to {m.deliveredBy.length}</small> : null}
                     </div>
                   </div>
                 )}

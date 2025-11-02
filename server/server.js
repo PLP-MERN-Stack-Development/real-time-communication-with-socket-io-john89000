@@ -45,16 +45,19 @@ io.on('connection', (socket) => {
   });
 
   // Handle chat messages
-  socket.on('send_message', (messageData) => {
+  // send_message now supports an optional clientTempId and an acknowledgement callback
+  socket.on('send_message', (messageData, callback) => {
     const message = {
       ...messageData,
       id: Date.now(),
+      clientTempId: messageData.clientTempId || null,
       sender: users[socket.id]?.username || 'Anonymous',
       senderId: socket.id,
       timestamp: new Date().toISOString(),
       room: messageData.room || 'global',
       reactions: {},
       readBy: [],
+      deliveredBy: [],
     };
 
     messages.push(message);
@@ -70,12 +73,18 @@ io.on('connection', (socket) => {
     } else {
       io.emit('receive_message', message);
     }
+
+    // acknowledge to sender with server-assigned id
+    if (typeof callback === 'function') {
+      callback({ status: 'ok', id: message.id, clientTempId: message.clientTempId });
+    }
   });
 
   // Send a message to a specific room
-  socket.on('send_room_message', ({ room, message }) => {
+  socket.on('send_room_message', ({ room, message, clientTempId }, callback) => {
     const messageObj = {
       id: Date.now(),
+      clientTempId: clientTempId || null,
       sender: users[socket.id]?.username || 'Anonymous',
       senderId: socket.id,
       message,
@@ -83,11 +92,13 @@ io.on('connection', (socket) => {
       room,
       reactions: {},
       readBy: [],
+      deliveredBy: [],
     };
 
     messages.push(messageObj);
     if (!rooms[room]) rooms[room] = { members: new Set() };
     io.to(room).emit('room_message', messageObj);
+    if (typeof callback === 'function') callback({ status: 'ok', id: messageObj.id, clientTempId: messageObj.clientTempId });
   });
 
   // Join a room
@@ -106,9 +117,10 @@ io.on('connection', (socket) => {
   });
 
   // Handle image/file message (base64 payload)
-  socket.on('send_image', ({ imageBase64, filename, room }) => {
+  socket.on('send_image', ({ imageBase64, filename, room, clientTempId }, callback) => {
     const messageObj = {
       id: Date.now(),
+      clientTempId: clientTempId || null,
       sender: users[socket.id]?.username || 'Anonymous',
       senderId: socket.id,
       message: filename || 'image',
@@ -117,12 +129,31 @@ io.on('connection', (socket) => {
       room: room || 'global',
       reactions: {},
       readBy: [],
+      deliveredBy: [],
     };
     messages.push(messageObj);
     if (messageObj.room && messageObj.room !== 'global') {
       io.to(messageObj.room).emit('room_message', messageObj);
     } else {
       io.emit('receive_message', messageObj);
+    }
+    if (typeof callback === 'function') callback({ status: 'ok', id: messageObj.id, clientTempId: messageObj.clientTempId });
+  });
+
+  // Delivery acknowledgements from recipients
+  socket.on('delivered', (messageId) => {
+    const msg = messages.find((m) => m.id === messageId);
+    if (msg) {
+      if (!msg.deliveredBy) msg.deliveredBy = [];
+      if (!msg.deliveredBy.includes(socket.id)) {
+        msg.deliveredBy.push(socket.id);
+      }
+      const payload = { messageId, deliveredBy: msg.deliveredBy };
+      if (msg.room && msg.room !== 'global') {
+        io.to(msg.room).emit('message_delivered', payload);
+      } else {
+        io.emit('message_delivered', payload);
+      }
     }
   });
 
@@ -202,8 +233,25 @@ io.on('connection', (socket) => {
 });
 
 // API routes
+// Paginated messages endpoint: /api/messages?limit=50&before=<iso timestamp>
 app.get('/api/messages', (req, res) => {
-  res.json(messages);
+  const limit = parseInt(req.query.limit, 10) || 50;
+  const before = req.query.before ? new Date(req.query.before).getTime() : Infinity;
+  const filtered = messages.filter((m) => new Date(m.timestamp).getTime() < before);
+  // return most recent 'limit' messages before the provided timestamp
+  const result = filtered.slice(-limit);
+  res.json(result);
+});
+
+// Simple server-side search over stored messages
+app.get('/api/messages/search', (req, res) => {
+  const q = (req.query.q || '').toLowerCase();
+  if (!q) return res.json([]);
+  const result = messages.filter((m) => {
+    const text = `${m.message || ''} ${m.sender || ''}`.toLowerCase();
+    return text.includes(q);
+  });
+  res.json(result);
 });
 
 app.get('/api/users', (req, res) => {

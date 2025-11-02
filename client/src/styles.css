@@ -2,3 +2,12 @@
 body { margin: 0; padding: 0; }
 input { padding: 6px 8px; }
 button { padding: 6px 10px; }
+
+/* Responsive layout for small screens */
+@media (max-width: 720px) {
+	body { font-size: 14px; }
+	#root > div { padding: 12px !important; }
+	.app-columns { display: block !important; }
+	.chat-column { width: 100% !important; }
+	.users-column { width: 100% !important; margin-top: 12px !important; }
+}
